@@ -1,48 +1,49 @@
 import os
-import numpy as np
+import streamlit as st
 import faiss
+import numpy as np
 from sentence_transformers import SentenceTransformer
 from groq import Groq
-import os
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-# === CONFIG ===
+# === ENV VAR SETUP ===
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 model_name = "llama3-8b-8192"
 
-# === KNOWLEDGE BASE ===
-knowledge_base = [
-   "Strength training is essential for muscle building. It includes exercises like squats, deadlifts, bench press, and rows.",
-    "Protein is important for muscle repair and growth. Good sources include chicken, eggs, tofu, fish, and legumes.",
-    "Cardio exercises like running, cycling, and swimming improve heart health and aid in fat loss.",
-    "A balanced diet includes carbohydrates, proteins, fats, vitamins, and minerals. Each plays a unique role in health.",
-    "Drinking enough water is vital for metabolism, muscle function, and recovery after exercise.",
-    "Consuming fewer calories than you burn leads to weight loss, while a calorie surplus promotes weight gain.",
-    "Sleep and recovery are just as important as exercise. Aim for 7-9 hours of sleep for optimal performance.",
-    "Healthy fats such as those from nuts, seeds, olive oil, and avocado support brain function and hormone health.",
-    "Carbs are the body's preferred energy source. Complex carbs like oats, quinoa, and brown rice are healthier than refined carbs.",
-    "Micronutrients like iron, calcium, magnesium, and vitamin D are essential for muscle function and overall health.",
+# === HARDCODED FITNESS KNOWLEDGE BASE ===
+kb_chunks = [
+    "Strength training builds muscle and includes squats, deadlifts, and presses.",
+    "Protein is essential for muscle recovery and is found in eggs, fish, and tofu.",
+    "Cardio improves heart health and burns fat. Examples: running, cycling, HIIT.",
+    "Sleep (7–9 hrs) helps recovery and hormone regulation, critical for fitness progress.",
+    "Healthy fats (avocados, olive oil, nuts) are essential for brain and hormone health.",
+    "Complex carbs (like oats, rice, quinoa) provide long-lasting energy for workouts.",
+    "Drinking water helps metabolism, digestion, and physical performance.",
+    "Weight loss = calorie deficit; weight gain = calorie surplus. Both require consistency.",
+    "Micronutrients like magnesium, iron, and vitamin D support muscle and energy systems.",
+    "Supplements like creatine, whey protein, and multivitamins can support fitness goals."
 ]
 
-# === EMBEDDING MODEL ===
-embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
-embeddings = embedding_model.encode(knowledge_base)
+# === EMBEDDINGS + VECTOR INDEX (cached) ===
+@st.cache_resource
+def setup_index(chunks):
+    model = SentenceTransformer("all-MiniLM-L6-v2")
+    embeddings = model.encode(chunks)
+    index = faiss.IndexFlatL2(embeddings.shape[1])
+    index.add(np.array(embeddings))
+    return model, index
 
-# === VECTOR INDEX ===
-index = faiss.IndexFlatL2(embeddings.shape[1])
-index.add(np.array(embeddings))
+embedding_model, faiss_index = setup_index(kb_chunks)
 
-# === CHATBOT FUNCTION ===
-def ask(query, k=2):
+# === ASK FUNCTION ===
+def ask(query, k=4):
     query_vec = embedding_model.encode([query])
-    _, I = index.search(np.array(query_vec), k)
-    top_chunks = [knowledge_base[i] for i in I[0]]
-    context = "\n".join(top_chunks)
+    _, I = faiss_index.search(np.array(query_vec), k)
+    top_context = "\n".join([kb_chunks[i] for i in I[0]])
 
-    prompt = f"""Answer the question based on the context below.
+    prompt = f"""Answer the fitness-related question below using the context:
 
 Context:
-{context}
+{top_context}
 
 Question: {query}
 Answer:"""
@@ -51,16 +52,27 @@ Answer:"""
         model=model_name,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.7,
-        max_tokens=300
+        max_tokens=400
     )
     return response.choices[0].message.content.strip()
 
-# === RUN CHAT ===
-if __name__ == "__main__":
-    print("🧠 Fitbot. Type 'exit' to quit.\n")
-    while True:
-        user_input = input("You: ")
-        if user_input.lower() in ["exit", "quit"]:
-            break
-        answer = ask(user_input)
-        print("FitBot:", answer, "\n")
+# === STREAMLIT UI ===
+st.title("🏋️ Fitness RAG Chatbot")
+st.markdown("Ask about training, food, sleep, recovery, etc.")
+
+if "history" not in st.session_state:
+    st.session_state.history = []
+
+user_input = st.text_input("You:", "")
+
+if user_input:
+    with st.spinner("Thinking..."):
+        reply = ask(user_input)
+        st.session_state.history.append((user_input, reply))
+
+# Display history 
+#manav mangukiya
+for user, bot in reversed(st.session_state.history):
+    st.markdown(f"**You:** {user}")
+    st.markdown(f"**Bot:** {bot}")
+    st.markdown("---")
