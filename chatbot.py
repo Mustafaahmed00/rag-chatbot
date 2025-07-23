@@ -7,6 +7,10 @@ from sklearn.metrics.pairwise import cosine_similarity
 from groq import Groq
 import time
 import json
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # === ENV VAR SETUP ===
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
